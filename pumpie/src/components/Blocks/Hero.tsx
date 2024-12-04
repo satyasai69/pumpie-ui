@@ -4,7 +4,7 @@ import { SpaceParticles } from "./SpaceParticles"
 import { FloatingElements } from "@/components/Blocks/Floating-elements"
 import { FallingComets } from "./FallingComets"
 import './features.css'
-import HeroImg from '../../assets/hero.png'
+import HeroImg from '../../assets/hero-1.webp'
 import { Link } from "react-router-dom"
 import { ArrowRight } from 'lucide-react'
 
@@ -18,7 +18,7 @@ export default function Home() {
       <SpaceParticles />
       
       <div className="relative">
-        <NavBar />
+       
         
         <main className="max-w-7xl mx-auto px-6 py-8">
           <div className="grid lg:grid-cols-2 gap-12 items-center">
@@ -51,8 +51,8 @@ export default function Home() {
             </div>
             
             <div className="lg:justify-self-end relative">
-              <div className="absolute inset-0 bg-gradient-to-r from-[#7C3AED]/20 to-transparent rounded-3xl filter blur-xl"></div>
-              <div className="bg-white relative overflow-hidden">
+              <div className="absolute bg-gradient-to-r from-[#7C3AED]/20 to-transparent rounded-3xl filter blur-xl"></div>
+              <div className=" relative overflow-hidden">
                 <main className="relative container mx-auto px-4 py-16">
                   
                   

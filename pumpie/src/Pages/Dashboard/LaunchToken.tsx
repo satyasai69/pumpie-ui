@@ -1,28 +1,61 @@
-import React, { useState } from 'react';
-import toast from 'react-hot-toast';
-import { uploadToIPFS, uploadJSONToIPFS } from '../../services/ipfs';
+import React, { useState, ChangeEvent } from 'react';
+import { Address, toNano } from '@ton/core';
+import { Jetton } from '../../../wrappers/Jetton';
+import { buildOnchainMetadata, createCompactUrl } from '../../../utils/jetton-helpers';
+import { uploadToIPFS, validateImageFile } from '../../utils/ipfs-upload';
+import { toast } from 'react-hot-toast';
 
 interface TokenFormData {
   tokenName: string;
   tokenSymbol: string;
-  totalSupply: string;
-  tokenImage: File | null;
   description: string;
-  gptPrompt: string;
+  imageUrl: string;
+  totalSupply: string;
 }
 
 export const LaunchToken: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [currentStep, setCurrentStep] = useState(1);
+  const [imageFile, setImageFile] = useState<File | null>(null);
   const [formData, setFormData] = useState<TokenFormData>({
     tokenName: '',
     tokenSymbol: '',
-    totalSupply: '',
-    tokenImage: null,
     description: '',
-    gptPrompt: ''
+    imageUrl: '',
+    totalSupply: ''
   });
+  const [isUploading, setIsUploading] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+
+  const handleImageUpload = async (event: ChangeEvent<HTMLInputElement>) => {
+    const file = event.target.files?.[0];
+    if (!file) return;
+
+    try {
+      // Validate file
+      validateImageFile(file);
+      
+      // Set local file for preview
+      setImageFile(file);
+      
+      // Start upload
+      setIsUploading(true);
+      const ipfsUrl = await uploadToIPFS(file);
+      
+      // Update form data with IPFS URL
+      setFormData(prev => ({
+        ...prev,
+        imageUrl: ipfsUrl
+      }));
+      
+      toast.success('Image uploaded successfully!');
+    } catch (error: any) {
+      toast.error(error.message);
+      setImageFile(null);
+    } finally {
+      setIsUploading(false);
+    }
+  };
 
   const handleInputChange = (e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     const { name, value } = e.target;
@@ -32,60 +65,90 @@ export const LaunchToken: React.FC = () => {
     }));
   };
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setFormData(prev => ({
-        ...prev,
-        tokenImage: e.target.files![0]
-      }));
-    }
-  };
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    setIsLoading(true);
-    
+  const handleTokenLaunch = async () => {
     try {
-      // Upload image to IPFS
-      let imageUrl = '';
-      if (formData.tokenImage) {
-        imageUrl = await uploadToIPFS(formData.tokenImage);
+      // Validate input lengths
+      if (formData.tokenName.length > 32) {
+        throw new Error('Token name must be less than 32 characters');
+      }
+      if (formData.description.length > 64) {
+        throw new Error('Description must be less than 64 characters');
+      }
+      if (!formData.imageUrl) {
+        throw new Error('Please upload an image first');
       }
 
-      // Prepare token metadata
-      const tokenMetadata = {
+      // Create compact URL for the image
+      const compactImageUrl = createCompactUrl(formData.imageUrl);
+      console.log('Original URL:', formData.imageUrl);
+      console.log('Compact URL:', compactImageUrl);
+
+      // Create metadata cell with compact URL
+      const metadata = buildOnchainMetadata({
         name: formData.tokenName,
-        symbol: formData.tokenSymbol,
-        totalSupply: formData.totalSupply,
         description: formData.description,
-        image: imageUrl,
-        gptPrompt: formData.gptPrompt,
-        createdAt: new Date().toISOString()
-      };
-
-      // Upload metadata to IPFS
-      const metadataUrl = await uploadJSONToIPFS(tokenMetadata);
-
-      // Here you would typically make an API call to your backend to:
-      // 1. Store the token data in your database
-      // 2. Deploy the token contract on TON
-      // For now, we'll just simulate it
-      await new Promise(resolve => setTimeout(resolve, 1500));
-      
-      toast.success('Token launch initiated successfully! 🚀');
-      setIsModalOpen(false);
-      setCurrentStep(1);
-      setFormData({
-        tokenName: '',
-        tokenSymbol: '',
-        totalSupply: '',
-        tokenImage: null,
-        description: '',
-        gptPrompt: ''
+        image: compactImageUrl
       });
-    } catch (error) {
-      console.error('Error launching token:', error);
-      toast.error('Failed to launch token. Please try again.');
+
+      // Rest of deployment logic remains the same...
+      const provider = window.ton;
+      if (!provider) {
+        throw new Error("TON wallet not connected");
+      }
+
+      try {
+        // Get the connected wallet address
+        const walletAddress = await provider.send('ton_requestAccounts');
+        if (!walletAddress || !walletAddress.length) {
+          throw new Error("Failed to get wallet address");
+        }
+
+        const senderAddress = Address.parse(walletAddress[0]);
+
+        const jetton = Jetton.createFromConfig({
+          adminAddress: senderAddress,
+          content: metadata,
+          workchain: 0
+        });
+
+        // Deploy contract
+        setIsLoading(true);
+        await jetton.sendDeploy(
+          provider,
+          { address: senderAddress },
+          toNano('0.5')
+        );
+
+        // Wait and initialize
+        await new Promise(resolve => setTimeout(resolve, 5000));
+        await jetton.send(
+          provider,
+          { address: senderAddress },
+          {
+            value: toNano('0.3'),
+            bounce: true
+          }
+        );
+
+        toast.success('Token deployed successfully!');
+        setIsModalOpen(false);
+        setCurrentStep(1);
+        setFormData({
+          tokenName: '',
+          tokenSymbol: '',
+          description: '',
+          imageUrl: '',
+          totalSupply: ''
+        });
+        setImageFile(null);
+
+      } catch (error: any) {
+        console.error('Deployment error:', error);
+        toast.error(error.message || 'Failed to deploy token');
+      }
+    } catch (error: any) {
+      console.error('Deployment error:', error);
+      toast.error(error.message || 'Failed to deploy token');
     } finally {
       setIsLoading(false);
     }
@@ -149,12 +212,12 @@ export const LaunchToken: React.FC = () => {
               </div>
             </div>
 
-            <form onSubmit={handleSubmit} className="space-y-6">
+            <form className="space-y-6">
               {currentStep === 1 ? (
                 <>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Token Name
+                      Token Name *
                     </label>
                     <input
                       type="text"
@@ -167,7 +230,7 @@ export const LaunchToken: React.FC = () => {
                   </div>
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Token Symbol
+                      Token Symbol *
                     </label>
                     <input
                       type="text"
@@ -188,27 +251,38 @@ export const LaunchToken: React.FC = () => {
                       value={formData.totalSupply}
                       onChange={handleInputChange}
                       className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                      required
                     />
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Token Image
+                      Token Image *
                     </label>
-                    <input
-                      type="file"
-                      name="tokenImage"
-                      accept="image/*"
-                      onChange={handleFileChange}
-                      className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
-                      required
+                    <input 
+                      type="file" 
+                      accept="image/jpeg,image/png,image/gif,image/webp"
+                      onChange={handleImageUpload}
+                      disabled={isUploading}
+                      className="mt-1 block w-full"
                     />
+                    {imageFile && (
+                      <img 
+                        src={URL.createObjectURL(imageFile)} 
+                        alt="Preview" 
+                        className="mt-2 max-w-[200px] max-h-[200px] object-cover" 
+                      />
+                    )}
+                    {isUploading && (
+                      <p className="text-blue-500 mt-2">Uploading to IPFS...</p>
+                    )}
+                    {formData.imageUrl && (
+                      <p className="text-green-500 mt-2 text-sm">
+                        IPFS URL: {formData.imageUrl}
+                      </p>
+                    )}
                   </div>
-
                   <div>
                     <label className="block text-sm font-medium text-gray-700 mb-1">
-                      Description
+                      Description *
                     </label>
                     <textarea
                       name="description"
@@ -232,7 +306,6 @@ export const LaunchToken: React.FC = () => {
                     className="w-full px-4 py-2 border border-gray-300 rounded-lg focus:ring-blue-500 focus:border-blue-500"
                     rows={6}
                     placeholder="Describe how you want your token's AI to behave and interact..."
-                    required
                   />
                 </div>
               )}
@@ -257,10 +330,12 @@ export const LaunchToken: React.FC = () => {
                   </button>
                 ) : (
                   <button
-                    type="submit"
+                    type="button"
+                    onClick={handleTokenLaunch}
                     className="ml-auto px-6 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700"
+                    disabled={isLoading}
                   >
-                    Launch Token
+                    {isLoading ? 'Launching...' : 'Launch Token'}
                   </button>
                 )}
               </div>

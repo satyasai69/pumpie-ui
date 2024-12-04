@@ -1,0 +1,4 @@
+;; Comment "Tokens sold successfully"
+cell __gen_cell_comment_f6615e045c0691109b8e7f3d97792b595c7c7567287444db4d183124c573fc4e() asm """
+    B{b5ee9c7241010101001e00003800000000546f6b656e7320736f6c64207375636365737366756c6c792bcc2caa} B>boc PUSHREF
+""";

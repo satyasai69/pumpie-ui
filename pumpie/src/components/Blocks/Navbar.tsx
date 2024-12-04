@@ -1,12 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTonConnectUI } from '@tonconnect/ui-react';
+import { Address } from '@ton/core';
+import { useNetwork } from '../../context/NetworkContext';
 
 export const NavBar = () => {
   const [tonConnectUI] = useTonConnectUI();
   const navigate = useNavigate();
   const [isConnected, setIsConnected] = useState(false);
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
+  const { network, setNetwork } = useNetwork();
 
   useEffect(() => {
     const checkConnection = () => {
@@ -42,9 +45,20 @@ export const NavBar = () => {
     }
   };
 
+  const handleNetworkSwitch = (newNetwork: 'mainnet' | 'testnet') => {
+    setNetwork(newNetwork);
+    setIsDropdownOpen(false);
+  };
+
   const formatAddress = (address: string | undefined) => {
     if (!address) return '';
     return `${address.slice(0, 4)}...${address.slice(-4)}`;
+  };
+
+  const getNetworkBadgeStyle = () => {
+    return network === 'testnet' 
+      ? 'bg-yellow-500/10 text-yellow-500'
+      : 'bg-green-500/10 text-green-500';
   };
 
   return (
@@ -63,6 +77,9 @@ export const NavBar = () => {
                   className="flex items-center space-x-2 px-4 py-2 text-sm text-white bg-white/5 hover:bg-white/10 rounded-lg transition-all border border-white/10"
                 >
                   <span>{formatAddress(tonConnectUI.account?.address)}</span>
+                  <span className={`px-2 py-0.5 text-xs rounded-full ${getNetworkBadgeStyle()}`}>
+                    {network === 'testnet' ? 'Testnet' : 'Mainnet'}
+                  </span>
                   <svg className={`w-4 h-4 transition-transform ${isDropdownOpen ? 'rotate-180' : ''}`} fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
                   </svg>
@@ -77,8 +94,29 @@ export const NavBar = () => {
                       </p>
                     </div>
                     <div className="px-4 py-3 border-b border-white/10">
-                      <p className="text-sm text-white/60">Network</p>
-                      <p className="text-sm font-medium text-white">TON Mainnet</p>
+                      <p className="text-sm text-white/60 mb-2">Network</p>
+                      <div className="flex gap-2">
+                        <button
+                          onClick={() => handleNetworkSwitch('mainnet')}
+                          className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                            network === 'mainnet'
+                              ? 'bg-green-500/20 text-green-500'
+                              : 'bg-white/5 text-white/60 hover:bg-white/10'
+                          }`}
+                        >
+                          Mainnet
+                        </button>
+                        <button
+                          onClick={() => handleNetworkSwitch('testnet')}
+                          className={`flex-1 px-3 py-1.5 rounded-md text-sm font-medium transition-all ${
+                            network === 'testnet'
+                              ? 'bg-yellow-500/20 text-yellow-500'
+                              : 'bg-white/5 text-white/60 hover:bg-white/10'
+                          }`}
+                        >
+                          Testnet
+                        </button>
+                      </div>
                     </div>
                     <button
                       onClick={handleDisconnect}

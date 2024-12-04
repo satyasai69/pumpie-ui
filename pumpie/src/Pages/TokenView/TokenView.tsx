@@ -537,7 +537,7 @@ export const TokenView: React.FC<Props> = ({ tokenId, onBack }) => {
 
   return (
     <Container>
-      <BackButton onClick={onBack}>← Back to Token List</BackButton>
+      <BackButton onClick={onBack}>← Back</BackButton>
       
       <CardContainer>
         <SwapCardContainer>

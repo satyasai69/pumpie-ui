@@ -1,0 +1,147 @@
+#pragma version =0.4.4;
+#pragma allow-post-modification;
+#pragma compute-asm-ltr;
+
+#include "tact_Factory.headers.fc";
+#include "tact_Factory.stdlib.fc";
+#include "tact_Factory.storage.fc";
+
+;;
+;; Contract Factory functions
+;;
+
+(slice, cell, int) $Factory$_contract_init() impure inline_ref {
+    var (($self'owner, $self'pools, $self'totalPools)) = (null(), null(), null());
+    $self'owner = __tact_context_get_sender();
+    $self'totalPools = 0;
+    return ($self'owner, $self'pools, $self'totalPools);
+}
+
+((slice, cell, int), slice) $Factory$_fun_getPool((slice, cell, int) $self, slice $tokenAddress) impure inline_ref {
+    var (($self'owner, $self'pools, $self'totalPools)) = $self;
+    var $fresh$ret_61 = __tact_dict_get_slice_slice($self'pools, 267, $tokenAddress);
+    return (($self'owner, $self'pools, $self'totalPools), $fresh$ret_61);
+}
+
+((slice, cell, int), int) $Factory$_fun_getTotalPools((slice, cell, int) $self) impure inline_ref {
+    var (($self'owner, $self'pools, $self'totalPools)) = $self;
+    var $fresh$ret_62 = $self'totalPools;
+    return (($self'owner, $self'pools, $self'totalPools), $fresh$ret_62);
+}
+
+((slice, cell, int), slice) $Factory$_fun_owner((slice, cell, int) $self) impure inline_ref {
+    var (($self'owner, $self'pools, $self'totalPools)) = $self;
+    var $fresh$ret_63 = $self'owner;
+    return (($self'owner, $self'pools, $self'totalPools), $fresh$ret_63);
+}
+
+;;
+;; Receivers of a Contract Factory
+;;
+
+(((slice, cell, int)), ()) $Factory$_internal_binary_DeployPool((slice, cell, int) $self, (slice) $msg) impure inline {
+    var ($self'owner, $self'pools, $self'totalPools) = $self;
+    var ($msg'tokenAddress) = $msg;
+    throw_unless(39888, ($Context$_get_value(__tact_context_get()) >= 1100000000));
+    slice $existing = __tact_dict_get_slice_slice($self'pools, 267, $msg'tokenAddress);
+    throw_unless(45767, null?($existing));
+    var ($init'code, $init'data) = $Pool$_init_child(__tact_context_sys, $msg'tokenAddress);
+    slice $poolAddress = $global_contractAddress(($init'code, $init'data));
+    $self'pools~__tact_dict_set_slice_slice(267, $msg'tokenAddress, $poolAddress);
+    $self'totalPools = ($self'totalPools + 1);
+    $global_send($SendParameters$_constructor_to_value_mode_code_data_body($poolAddress, 1000000000, 2, $init'code, $init'data, $Deploy$_store_cell($Deploy$_constructor_queryId(0))));
+    $global_send($SendParameters$_constructor_to_value_mode_body($msg'tokenAddress, 50000000, 2, $TransferOwnership$_store_cell($TransferOwnership$_constructor_newOwner($poolAddress))));
+    $global_send($SendParameters$_constructor_to_value_mode($self'owner, 50000000, 66));
+    return (($self'owner, $self'pools, $self'totalPools), ());
+}
+
+(((slice, cell, int)), ()) $Factory$_internal_binary_Deploy((slice, cell, int) $self, (int) $deploy) impure inline {
+    var ($self'owner, $self'pools, $self'totalPools) = $self;
+    var ($deploy'queryId) = $deploy;
+    ($self'owner, $self'pools, $self'totalPools)~$Factory$_fun_notify($DeployOk$_store_cell($DeployOk$_constructor_queryId($deploy'queryId)));
+    return (($self'owner, $self'pools, $self'totalPools), ());
+}
+
+;;
+;; Get methods of a Contract Factory
+;;
+
+_ %getPool(slice $tokenAddress) method_id(87704) {
+    slice $tokenAddress = __tact_verify_address($tokenAddress);
+    var self = $Factory$_contract_load();
+    var res = self~$Factory$_fun_getPool($tokenAddress);
+    return res;
+}
+
+_ %getTotalPools() method_id(69354) {
+    var self = $Factory$_contract_load();
+    var res = self~$Factory$_fun_getTotalPools();
+    return res;
+}
+
+_ %owner() method_id(83229) {
+    var self = $Factory$_contract_load();
+    var res = self~$Factory$_fun_owner();
+    return res;
+}
+
+_ lazy_deployment_completed() method_id {
+    return get_data().begin_parse().load_int(1);
+}
+
+;;
+;; Routing of a Contract Factory
+;;
+
+((slice, cell, int), int) $Factory$_contract_router_internal((slice, cell, int) self, int msg_bounced, slice in_msg) impure inline_ref {
+    ;; Handle bounced messages
+    if (msg_bounced) {
+        return (self, true);
+    }
+    
+    ;; Parse incoming message
+    int op = 0;
+    if (slice_bits(in_msg) >= 32) {
+        op = in_msg.preload_uint(32);
+    }
+    
+    
+    ;; Receive DeployPool message
+    if (op == 4124895666) {
+        var msg = in_msg~$DeployPool$_load();
+        self~$Factory$_internal_binary_DeployPool(msg);
+        return (self, true);
+    }
+    
+    ;; Receive Deploy message
+    if (op == 2490013878) {
+        var msg = in_msg~$Deploy$_load();
+        self~$Factory$_internal_binary_Deploy(msg);
+        return (self, true);
+    }
+    
+    return (self, false);
+}
+
+() recv_internal(int msg_value, cell in_msg_cell, slice in_msg) impure {
+    
+    ;; Context
+    var cs = in_msg_cell.begin_parse();
+    var msg_flags = cs~load_uint(4);
+    var msg_bounced = -(msg_flags & 1);
+    slice msg_sender_addr = __tact_verify_address(cs~load_msg_addr());
+    __tact_context = (msg_bounced, msg_sender_addr, msg_value, cs);
+    __tact_context_sender = msg_sender_addr;
+    
+    ;; Load contract data
+    var self = $Factory$_contract_load();
+    
+    ;; Handle operation
+    int handled = self~$Factory$_contract_router_internal(msg_bounced, in_msg);
+    
+    ;; Throw if not handled
+    throw_unless(130, handled);
+    
+    ;; Persist state
+    $Factory$_contract_store(self);
+}
