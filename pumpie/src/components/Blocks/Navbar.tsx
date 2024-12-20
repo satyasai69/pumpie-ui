@@ -1,7 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { useTonConnectUI } from '@tonconnect/ui-react';
-import { Address } from '@ton/core';
 import { useNetwork } from '../../context/NetworkContext';
 
 export const NavBar = () => {
@@ -11,17 +10,25 @@ export const NavBar = () => {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false);
   const { network, setNetwork } = useNetwork();
 
+  // Handle connection status changes
   useEffect(() => {
-    const checkConnection = () => {
-      if (tonConnectUI.connected) {
+    const checkConnection = async (wallet: any) => {
+      if (wallet) {
         setIsConnected(true);
-        navigate('/dashboard');
+        // Only redirect if we're on the home page
+        if (window.location.pathname === '/') {
+          navigate('/dashboard', { replace: true });
+        }
       } else {
         setIsConnected(false);
+        navigate('/', { replace: true });
       }
     };
 
-    checkConnection();
+    // Check initial connection
+    checkConnection(tonConnectUI.account);
+
+    // Subscribe to connection changes
     const unsubscribe = tonConnectUI.onStatusChange(checkConnection);
     return () => {
       if (unsubscribe) unsubscribe();
@@ -30,7 +37,11 @@ export const NavBar = () => {
 
   const handleTonConnect = async () => {
     try {
-      await tonConnectUI.openModal();
+      const result = await tonConnectUI.connectWallet();
+      console.log('Connection result:', result);
+      if (result) {
+        navigate('/dashboard', { replace: true });
+      }
     } catch (error) {
       console.error('Connection failed:', error);
     }
@@ -39,10 +50,18 @@ export const NavBar = () => {
   const handleDisconnect = async () => {
     try {
       await tonConnectUI.disconnect();
-      navigate('/');
+      navigate('/', { replace: true });
     } catch (error) {
       console.error('Disconnect failed:', error);
     }
+  };
+
+  const handleSettings = async () => {
+ 
+     
+      navigate('/settings', { replace: true });
+   
+
   };
 
   const handleNetworkSwitch = (newNetwork: 'mainnet' | 'testnet') => {
@@ -66,7 +85,12 @@ export const NavBar = () => {
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
         <div className="flex items-center justify-between h-16">
           <div className="flex items-center">
-            <Link to="/" className="text-white font-bold text-xl">Pumpie</Link>
+            <Link 
+              to={isConnected ? "/dashboard" : "/"} 
+              className="text-white font-bold text-xl"
+            >
+              Pumpie
+            </Link>
           </div>
           
           <div className="flex items-center gap-4">
@@ -93,6 +117,11 @@ export const NavBar = () => {
                         {tonConnectUI.account?.address}
                       </p>
                     </div>
+
+
+
+
+                    
                     <div className="px-4 py-3 border-b border-white/10">
                       <p className="text-sm text-white/60 mb-2">Network</p>
                       <div className="flex gap-2">
@@ -118,6 +147,14 @@ export const NavBar = () => {
                         </button>
                       </div>
                     </div>
+                 
+                    <button
+                      onClick={handleSettings}
+                      className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-white/5 transition-all"
+                    >
+                      Settings
+                    </button>
+
                     <button
                       onClick={handleDisconnect}
                       className="w-full text-left px-4 py-2 text-sm text-red-400 hover:bg-white/5 transition-all"

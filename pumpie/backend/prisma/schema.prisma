@@ -1,0 +1,50 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model Token {
+  id          String   @id @default(uuid())
+  name        String
+  symbol      String
+  description String
+  imageUrl    String
+  status      String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  agent         Agent?
+  chatMessages  ChatMessage[]
+}
+
+model Agent {
+  id          String   @id @default(uuid())
+  type        String   // 'entertainment' or 'onchain'
+  description String
+  configJson  String   // Store AI config as stringified JSON
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  token       Token    @relation(fields: [tokenId], references: [id])
+  tokenId     String   @unique
+}
+
+model ChatMessage {
+  id        String   @id @default(uuid())
+  content   String
+  sender    String   // 'user' or 'agent'
+  timestamp DateTime @default(now())
+
+  // Relations
+  token     Token    @relation(fields: [tokenId], references: [id])
+  tokenId   String
+}

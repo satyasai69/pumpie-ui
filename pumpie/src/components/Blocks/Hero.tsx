@@ -1,4 +1,3 @@
-import { NavBar } from "@/components/Blocks/Navbar"
 import { Button } from "@/components/ui/button"
 import { SpaceParticles } from "./SpaceParticles"
 import { FloatingElements } from "@/components/Blocks/Floating-elements"
@@ -8,7 +7,7 @@ import HeroImg from '../../assets/hero-1.webp'
 import { Link } from "react-router-dom"
 import { ArrowRight } from 'lucide-react'
 
-export default function Home() {
+export default function Hero() {
   return (
     <div className="bg-white">
       <FloatingElements />

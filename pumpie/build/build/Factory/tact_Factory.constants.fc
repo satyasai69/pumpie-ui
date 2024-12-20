@@ -1,4 +1,0 @@
-;; Comment "Pool deployed"
-cell __gen_cell_comment_25e90c6b6874b217946b1d8da1a7d34cb75bc220f08c3f5ad004eb39efacfe84() asm """
-    B{b5ee9c7241010101001300002200000000506f6f6c206465706c6f796564fbfa4e02} B>boc PUSHREF
-""";

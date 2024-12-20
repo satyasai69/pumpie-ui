@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useCallback } from 'react';
 import styled from 'styled-components';
 import { VideoPlayer } from '../shared/VideoPlayer';
 import { IoClose, IoExpand } from 'react-icons/io5';
@@ -148,18 +148,18 @@ const VideoWrapper = styled.div<{ effectType: AnimeEffect }>`
   `}
 `;
 
-const Controls = styled.div`
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  padding: 8px;
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-  background: linear-gradient(to bottom, rgba(0,0,0,0.7) 0%, transparent 100%);
-  z-index: 1;
-`;
+const Controls = React.memo(({ onClose, onExpand }) => {
+  return (
+    <div>
+      <Button onClick={onExpand} title="Expand">
+        <IoExpand />
+      </Button>
+      <Button onClick={onClose} title="Close">
+        <IoClose />
+      </Button>
+    </div>
+  );
+});
 
 const Button = styled.button`
   background: transparent;
@@ -240,10 +240,10 @@ export const MiniPlayer: React.FC<Props> = ({ onClose, onClick }) => {
     };
   }, []);
 
-  const handleClose = (e: React.MouseEvent) => {
+  const handleClose = useCallback((e: React.MouseEvent) => {
     e.stopPropagation();
     onClose?.();
-  };
+  }, [onClose]);
 
   const handleExpand = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -278,46 +278,7 @@ export const MiniPlayer: React.FC<Props> = ({ onClose, onClick }) => {
   return (
     <MiniPlayerContainer>
       <VideoWrapper effectType={effectType}>
-        <Controls>
-          <EffectButtons>
-            <EffectButton
-              active={effectType === 'rainbow'}
-              onClick={toggleEffect('rainbow')}
-              title="Rainbow Mode"
-            >
-              🌈
-            </EffectButton>
-            <EffectButton
-              active={effectType === 'ninja'}
-              onClick={toggleEffect('ninja')}
-              title="Ninja Mode"
-            >
-              🥷
-            </EffectButton>
-            <EffectButton
-              active={effectType === 'neko'}
-              onClick={toggleEffect('neko')}
-              title="Neko Mode"
-            >
-              😺
-            </EffectButton>
-            <EffectButton
-              active={effectType === 'kawaii'}
-              onClick={toggleEffect('kawaii')}
-              title="Kawaii Mode"
-            >
-              🌸
-            </EffectButton>
-          </EffectButtons>
-          <div>
-            <Button onClick={handleExpand} title="Expand">
-              <IoExpand />
-            </Button>
-            <Button onClick={handleClose} title="Close">
-              <IoClose />
-            </Button>
-          </div>
-        </Controls>
+        <Controls onClose={handleClose} onExpand={handleExpand} />
         <VideoPlayer muted playsInline autoPlay />
         <LiveIndicator>LIVE</LiveIndicator>
       </VideoWrapper>

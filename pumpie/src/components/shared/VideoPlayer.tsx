@@ -6,6 +6,10 @@ const Video = styled.video`
   height: 100%;
   object-fit: cover;
   display: block;
+  &:focus-visible {
+    outline: 2px solid #7C3AED;
+    outline-offset: 2px;
+  }
 `;
 
 interface Props {
@@ -62,6 +66,8 @@ export const VideoPlayer: React.FC<Props> = ({
     return () => {
       clearInterval(streamCheck);
       if (video.srcObject) {
+        const stream = video.srcObject as MediaStream;
+        stream.getTracks().forEach(track => track.stop());
         video.srcObject = null;
       }
     };
@@ -76,6 +82,8 @@ export const VideoPlayer: React.FC<Props> = ({
       muted={muted}
       playsInline={playsInline}
       style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+      aria-label="Live stream video player"
+      role="application"
     />
   );
 };
