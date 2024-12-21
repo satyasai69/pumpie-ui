@@ -3,9 +3,15 @@ import { toast } from 'react-hot-toast';
 import { useNavigate } from 'react-router-dom';
 import { useAgentStore } from '../../services/agentService';
 import { NavBar } from '@/components/Blocks/Navbar';
+import { api } from '../../services/api';
+import { useTonConnectUI } from '@tonconnect/ui-react';
+import { useNetwork } from '../../context/NetworkContext';
+import { Address } from '@ton/core';
 
 export const LaunchToken: React.FC = () => {
   const navigate = useNavigate();
+  const [tonConnectUI] = useTonConnectUI();
+  const { network } = useNetwork();
   const { addTokenAgent } = useAgentStore();
   const [formData, setFormData] = useState({
     tokenName: '',
@@ -16,6 +22,8 @@ export const LaunchToken: React.FC = () => {
     projectDescription: '',
   });
 
+  const [step, setStep] = useState(1);
+
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
     setFormData(prev => ({
@@ -24,7 +32,7 @@ export const LaunchToken: React.FC = () => {
     }));
   };
 
-  const handleImageUpload = (e: ChangeEvent<HTMLInputElement>) => {
+  const handleImageUpload = async (e: ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       setFormData(prev => ({
         ...prev,
@@ -33,62 +41,129 @@ export const LaunchToken: React.FC = () => {
     }
   };
 
+  const uploadImage = async (file: File): Promise<string> => {
+    try {
+      const formData = new FormData();
+      formData.append('image', file);
+      
+      // For now, let's use a mock image URL
+      // In production, you would upload to a real image hosting service
+      return `https://example.com/images/${file.name}`;
+    } catch (error) {
+      console.error('Error uploading image:', error);
+      throw new Error('Failed to upload image');
+    }
+  };
+
+  const getNonBounceableAddress = (address: string, isTestnet: boolean): string => {
+    try {
+      let addr;
+      if (address.match(/^(EQ|UQ|kQ|0Q)/)) {
+        const parsed = Address.parseFriendly(address);
+        addr = parsed.address;
+      } else {
+        addr = Address.parse(address);
+      }
+      return addr.toString({
+        testOnly: isTestnet,
+        bounceable: false,
+        urlSafe: true
+      });
+    } catch (error) {
+      console.error('Address conversion error:', error);
+      return address;
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
+    console.log('Form submitted with data:', formData);
     
+    const wallet = tonConnectUI.account;
+    console.log('Wallet status:', wallet);
+    
+    if (!wallet) {
+      toast.error('Please connect your TON wallet first');
+      return;
+    }
+
+    if (!formData.tokenName || !formData.description) {
+      toast.error('Please fill in all required fields');
+      return;
+    }
+
     try {
-      // Generate a unique ID for the token
-      const tokenId = Date.now().toString();
+      console.log('Checking for existing tokens...');
+      const existingTokens = await api.getTokens();
+      console.log('Existing tokens response:', existingTokens);
       
-      // Create token object
-      const newToken = {
-        id: tokenId,
+      if (existingTokens.success && Array.isArray(existingTokens.tokens)) {
+        const tokenExists = existingTokens.tokens.some(
+          token => token.name.toLowerCase() === formData.tokenName.toLowerCase()
+        );
+        if (tokenExists) {
+          toast.error('A token with this name already exists');
+          return;
+        }
+      }
+
+      // Show loading toast
+      const loadingToast = toast.loading('Creating your token...');
+      console.log('Creating token...');
+
+      // First store in local agentStore for backward compatibility
+      const agent = {
         name: formData.tokenName,
         symbol: formData.tokenSymbol,
         description: formData.description,
-        imageUrl: formData.imageFile ? URL.createObjectURL(formData.imageFile) : 'https://picsum.photos/200',
-        price: 0,
-        priceChange24h: 0,
-        marketCap: 0,
-        volume24h: 0,
-        holders: 0,
         type: formData.agentType,
-        agent: {
-          type: formData.agentType,
-          description: formData.projectDescription
-        }
+        projectDescription: formData.projectDescription
       };
+      addTokenAgent(agent);
+      console.log('Added to agent store:', agent);
 
-      // Get existing tokens from localStorage
-      const existingTokens = localStorage.getItem('tokens');
-      const tokens = existingTokens ? JSON.parse(existingTokens) : [];
+      // Get non-bounceable address based on current network
+      const isTestnet = network === 'testnet';
+      const nonBounceableAddress = getNonBounceableAddress(wallet.address, isTestnet);
+      console.log('Non-bounceable address:', nonBounceableAddress);
+      
+      const tokenData = {
+        name: formData.tokenName,
+        description: formData.description,
+        agentType: formData.agentType,
+        creatorAddress: nonBounceableAddress,
+        imageUrl: 'https://picsum.photos/200',
+        networkType: isTestnet ? 'testnet' : 'mainnet'
+      };
+      console.log('Sending token data to API:', tokenData);
 
-      // Add new token
-      tokens.push(newToken);
-
-      // Save back to localStorage
-      localStorage.setItem('tokens', JSON.stringify(tokens));
-
-      // Create agent for the token
-      await addTokenAgent(tokenId, {
-        type: formData.agentType,
-        description: formData.projectDescription
-      });
-
-      // Show success message
-      toast.success('Token launched successfully!', {
-        duration: 3000,
-        position: 'top-center',
-      });
-
-      // Navigate to token list
-      setTimeout(() => {
-        navigate('/tokens');
-      }, 1000);
-
-    } catch (error) {
-      console.error('Error launching token:', error);
-      toast.error('Failed to launch token. Please try again.');
+      const response = await api.createToken(tokenData);
+      console.log('API response:', response);
+      
+      // Dismiss loading toast
+      toast.dismiss(loadingToast);
+      
+      if (response.success) {
+        // Show success message
+        toast.success('🎉 Token created successfully!');
+        console.log('Token created successfully:', response.token);
+        
+        // Navigate to the token view page
+        if (response.token?._id) {
+          console.log('Navigating to token view:', response.token._id);
+          setTimeout(() => {
+            navigate(`/token/${response.token._id}`);
+          }, 1000);
+        } else {
+          console.log('No token ID received, navigating to list');
+          navigate('/token-list');
+        }
+      } else {
+        throw new Error(response.error || 'Failed to create token');
+      }
+    } catch (error: any) {
+      console.error('Error creating token:', error);
+      toast.error(error.message || 'Failed to create token');
     }
   };
 
@@ -172,21 +247,23 @@ export const LaunchToken: React.FC = () => {
                   className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                   required
                 >
-                  <option value="entertainment">Entertainment Agent</option>
-                  <option value="onchain">On-chain Agent</option>
+                  <option value="entertainment">Entertainment</option>
+                  <option value="utility">Utility</option>
+                  <option value="social">Social</option>
+                  <option value="defi">DeFi</option>
                 </select>
               </div>
 
               <div>
-                <label className="block text-sm font-medium text-white/80">Project Description (for AI)</label>
+                <label className="block text-sm font-medium text-white/80">Project Description</label>
                 <textarea
                   name="projectDescription"
                   value={formData.projectDescription}
                   onChange={handleInputChange}
-                  rows={4}
+                  rows={5}
                   className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
                   required
-                  placeholder="Describe your token's purpose and features for the AI agent..."
+                  placeholder="Describe your token's purpose and features..."
                 />
               </div>
             </div>

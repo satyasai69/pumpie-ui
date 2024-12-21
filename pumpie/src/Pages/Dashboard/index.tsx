@@ -3,10 +3,12 @@ import { useNavigate } from 'react-router-dom';
 import { Button } from '@/components/ui/button';
 import { Card } from '@/components/ui/card';
 import { ArrowRight } from 'lucide-react';
+import { useTonConnectUI } from '@tonconnect/ui-react';
 
 export const Dashboard = () => {
   const navigate = useNavigate();
   const [tokens, setTokens] = useState<any[]>([]);
+  const [tonConnectUI] = useTonConnectUI();
 
   useEffect(() => {
     const loadTokens = () => {

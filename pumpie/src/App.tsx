@@ -32,7 +32,6 @@ function App() {
                 <Route element={<AuthGuard />}>
                   <Route path="/dashboard" element={<Dashboard />} />
                   <Route path="/settings" element={<Settings />} />
-             
                   <Route path="/tokens" element={<TokenList />} />
                   <Route path="/launch" element={<LaunchToken />} />
                   <Route path="/token/:tokenId" element={<TokenView />} />
