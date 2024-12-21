@@ -7,6 +7,11 @@ import { api } from '../../services/api';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { useNetwork } from '../../context/NetworkContext';
 import { Address } from '@ton/core';
+import { Button } from '@/components/ui/button';
+import { Card } from '@/components/ui/card';
+import axios from 'axios';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription } from "@/components/ui/dialog";
+import { createAIAgent } from '@/services/aiAgent';
 
 export const LaunchToken: React.FC = () => {
   const navigate = useNavigate();
@@ -23,6 +28,10 @@ export const LaunchToken: React.FC = () => {
   });
 
   const [step, setStep] = useState(1);
+  const [isUploading, setIsUploading] = useState(false);
+  const [showSuccessModal, setShowSuccessModal] = useState(false);
+  const [launchedToken, setLaunchedToken] = useState<any>(null);
+  const [isLoading, setIsLoading] = useState(false);
 
   const handleInputChange = (e: ChangeEvent<HTMLInputElement | HTMLTextAreaElement | HTMLSelectElement>) => {
     const { name, value } = e.target;
@@ -41,17 +50,27 @@ export const LaunchToken: React.FC = () => {
     }
   };
 
-  const uploadImage = async (file: File): Promise<string> => {
+  const uploadToIPFS = async (file: File): Promise<string> => {
     try {
+      setIsUploading(true);
       const formData = new FormData();
-      formData.append('image', file);
-      
-      // For now, let's use a mock image URL
-      // In production, you would upload to a real image hosting service
-      return `https://example.com/images/${file.name}`;
+      formData.append('file', file);
+
+      const response = await axios.post('https://api.pinata.cloud/pinning/pinFileToIPFS', formData, {
+        headers: {
+          'Content-Type': 'multipart/form-data',
+          'pinata_api_key': 'c9a4d9a86b1b928093b0',
+          'pinata_secret_api_key': 'f5390adfe05b02de0427111b8f707ffe938b93dc00f8fa17ba34d20dfb306b7f',
+        },
+      });
+
+      const ipfsHash = response.data.IpfsHash;
+      return `https://gateway.pinata.cloud/ipfs/${ipfsHash}`;
     } catch (error) {
-      console.error('Error uploading image:', error);
-      throw new Error('Failed to upload image');
+      console.error('Error uploading to IPFS:', error);
+      throw new Error('Failed to upload image to IPFS');
+    } finally {
+      setIsUploading(false);
     }
   };
 
@@ -75,28 +94,37 @@ export const LaunchToken: React.FC = () => {
     }
   };
 
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    console.log('Form submitted with data:', formData);
-    
-    const wallet = tonConnectUI.account;
-    console.log('Wallet status:', wallet);
-    
-    if (!wallet) {
-      toast.error('Please connect your TON wallet first');
-      return;
-    }
-
-    if (!formData.tokenName || !formData.description) {
-      toast.error('Please fill in all required fields');
-      return;
-    }
+  const handleSubmit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setIsLoading(true);
 
     try {
-      console.log('Checking for existing tokens...');
-      const existingTokens = await api.getTokens();
-      console.log('Existing tokens response:', existingTokens);
+      const wallet = tonConnectUI.account;
       
+      if (!wallet) {
+        toast.error('Please connect your TON wallet first');
+        return;
+      }
+
+      if (!formData.tokenName || !formData.description || !formData.projectDescription || !formData.imageFile) {
+        toast.error('Please fill in all required fields and upload an image');
+        return;
+      }
+
+      // Upload image to IPFS
+      let imageUrl = '';
+      if (formData.imageFile) {
+        try {
+          toast.loading('Uploading image to IPFS...');
+          imageUrl = await uploadToIPFS(formData.imageFile);
+        } catch (error) {
+          toast.error('Failed to upload image to IPFS');
+          return;
+        }
+      }
+
+      // Check for existing tokens
+      const existingTokens = await api.getTokens();
       if (existingTokens.success && Array.isArray(existingTokens.tokens)) {
         const tokenExists = existingTokens.tokens.some(
           token => token.name.toLowerCase() === formData.tokenName.toLowerCase()
@@ -107,176 +135,209 @@ export const LaunchToken: React.FC = () => {
         }
       }
 
-      // Show loading toast
-      const loadingToast = toast.loading('Creating your token...');
-      console.log('Creating token...');
-
-      // First store in local agentStore for backward compatibility
-      const agent = {
-        name: formData.tokenName,
-        symbol: formData.tokenSymbol,
-        description: formData.description,
-        type: formData.agentType,
-        projectDescription: formData.projectDescription
-      };
-      addTokenAgent(agent);
-      console.log('Added to agent store:', agent);
-
-      // Get non-bounceable address based on current network
-      const isTestnet = network === 'testnet';
-      const nonBounceableAddress = getNonBounceableAddress(wallet.address, isTestnet);
-      console.log('Non-bounceable address:', nonBounceableAddress);
-      
+      // Create token
       const tokenData = {
         name: formData.tokenName,
         description: formData.description,
+        projectDescription: formData.projectDescription,
         agentType: formData.agentType,
-        creatorAddress: nonBounceableAddress,
-        imageUrl: 'https://picsum.photos/200',
-        networkType: isTestnet ? 'testnet' : 'mainnet'
+        creatorAddress: getNonBounceableAddress(wallet.address, network === 'testnet'),
+        imageUrl,
+        networkType: network === 'testnet' ? 'testnet' : 'mainnet'
       };
-      console.log('Sending token data to API:', tokenData);
 
       const response = await api.createToken(tokenData);
-      console.log('API response:', response);
-      
-      // Dismiss loading toast
-      toast.dismiss(loadingToast);
       
       if (response.success) {
-        // Show success message
-        toast.success('🎉 Token created successfully!');
-        console.log('Token created successfully:', response.token);
+        // Create and initialize AI agent
+        const agent = createAIAgent({
+          name: formData.tokenName,
+          description: formData.description,
+          agentType: formData.agentType,
+        });
+
+        // Save agent to database
+        await agent.saveToDatabase();
+
+        setLaunchedToken(response.token);
+        toast.success('🚀 Token launched successfully!');
+        setShowSuccessModal(true);
         
-        // Navigate to the token view page
-        if (response.token?._id) {
-          console.log('Navigating to token view:', response.token._id);
-          setTimeout(() => {
-            navigate(`/token/${response.token._id}`);
-          }, 1000);
-        } else {
-          console.log('No token ID received, navigating to list');
-          navigate('/token-list');
-        }
+        // Navigate after a delay
+        setTimeout(() => {
+          navigate(`/token/${response.token.id}`);
+        }, 3000);
       } else {
-        throw new Error(response.error || 'Failed to create token');
+        toast.error('Failed to launch token');
       }
-    } catch (error: any) {
-      console.error('Error creating token:', error);
-      toast.error(error.message || 'Failed to create token');
+    } catch (error) {
+      console.error('Error launching token:', error);
+      toast.error('Failed to launch token');
+    } finally {
+      setIsLoading(false);
     }
   };
 
   return (
-    <>
+    <div className="container mx-auto p-6">
       <NavBar />
-      <div className="p-6 max-w-4xl mx-auto">
-        <h1 className="text-2xl font-bold mb-6 text-white">Launch Your Token</h1>
-        
-        <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="bg-white/10 backdrop-blur-md p-6 rounded-lg shadow border border-white/20">
-            <h2 className="text-xl font-semibold mb-4 text-white">Token Details</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-white/80">Token Name</label>
-                <input
-                  type="text"
-                  name="tokenName"
-                  value={formData.tokenName}
-                  onChange={handleInputChange}
-                  className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-              
-              <div>
-                <label className="block text-sm font-medium text-white/80">Token Symbol</label>
-                <input
-                  type="text"
-                  name="tokenSymbol"
-                  value={formData.tokenSymbol}
-                  onChange={handleInputChange}
-                  className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-white/80">Description</label>
-                <textarea
-                  name="description"
-                  value={formData.description}
-                  onChange={handleInputChange}
-                  rows={3}
-                  className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  required
-                />
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-white/80">Token Image</label>
-                <input
-                  type="file"
-                  accept="image/*"
-                  onChange={handleImageUpload}
-                  className="mt-1 block w-full text-white/80
-                    file:mr-4 file:py-2 file:px-4
-                    file:rounded-full file:border-0
-                    file:text-sm file:font-semibold
-                    file:bg-indigo-500/10 file:text-indigo-400
-                    hover:file:bg-indigo-500/20"
-                />
-                {formData.imageFile && (
-                  <p className="mt-2 text-sm text-white/60">
-                    Selected: {formData.imageFile.name}
-                  </p>
-                )}
-              </div>
-            </div>
-          </div>
-
-          <div className="bg-white/10 backdrop-blur-md p-6 rounded-lg shadow border border-white/20">
-            <h2 className="text-xl font-semibold mb-4 text-white">Agent Configuration</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-white/80">Agent Type</label>
-                <select
-                  name="agentType"
-                  value={formData.agentType}
-                  onChange={handleInputChange}
-                  className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  required
-                >
-                  <option value="entertainment">Entertainment</option>
-                  <option value="utility">Utility</option>
-                  <option value="social">Social</option>
-                  <option value="defi">DeFi</option>
-                </select>
-              </div>
-
-              <div>
-                <label className="block text-sm font-medium text-white/80">Project Description</label>
-                <textarea
-                  name="projectDescription"
-                  value={formData.projectDescription}
-                  onChange={handleInputChange}
-                  rows={5}
-                  className="mt-1 block w-full rounded-md bg-white/5 border-white/10 text-white shadow-sm focus:border-indigo-500 focus:ring-indigo-500"
-                  required
-                  placeholder="Describe your token's purpose and features..."
-                />
-              </div>
-            </div>
-          </div>
-
-          <button
-            type="submit"
-            className="w-full py-2 px-4 border border-transparent rounded-md shadow-sm text-sm font-medium text-white bg-gradient-to-r from-indigo-500 to-purple-600 hover:from-indigo-600 hover:to-purple-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
-          >
-            Launch Token
-          </button>
-        </form>
+      <div className="flex items-center p-5 mb-6">
+        <h1 className="text-2xl font-bold text-white">Launch Your Token</h1>
       </div>
-    </>
+
+      <Card className="bg-gray-900 p-6">
+        <form onSubmit={handleSubmit} className="space-y-6">
+          <div className="space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">
+                Token Name
+              </label>
+              <input
+                type="text"
+                name="tokenName"
+                value={formData.tokenName}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-[#00FFA3] focus:border-transparent"
+                placeholder="Enter token name"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">
+                Token Symbol
+              </label>
+              <input
+                type="text"
+                name="tokenSymbol"
+                value={formData.tokenSymbol}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-[#00FFA3] focus:border-transparent"
+                placeholder="Enter token symbol"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">
+                Description
+              </label>
+              <textarea
+                name="description"
+                value={formData.description}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-[#00FFA3] focus:border-transparent"
+                placeholder="Enter token description"
+                rows={3}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">
+                Project Description
+              </label>
+              <textarea
+                name="projectDescription"
+                value={formData.projectDescription}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-[#00FFA3] focus:border-transparent"
+                placeholder="Enter project description"
+                rows={4}
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">
+                Agent Type
+              </label>
+              <select
+                name="agentType"
+                value={formData.agentType}
+                onChange={handleInputChange}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-[#00FFA3] focus:border-transparent"
+              >
+                <option value="entertainment">Entertainment</option>
+                <option value="defi">DeFi</option>
+                <option value="gaming">Gaming</option>
+                <option value="social">Social</option>
+                <option value="utility">Utility</option>
+              </select>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-gray-200 mb-1">
+                Token Image
+              </label>
+              <input
+                type="file"
+                accept="image/*"
+                onChange={handleImageUpload}
+                className="w-full px-4 py-2 bg-gray-800 border border-gray-700 rounded-lg text-white focus:ring-2 focus:ring-[#00FFA3] focus:border-transparent"
+              />
+              {formData.imageFile && (
+                <div className="mt-2">
+                  <img
+                    src={URL.createObjectURL(formData.imageFile)}
+                    alt="Preview"
+                    className="w-24 h-24 object-cover rounded-lg"
+                  />
+                </div>
+              )}
+            </div>
+          </div>
+
+          <div className="flex justify-end pt-4">
+            <Button
+              type="submit"
+              disabled={isLoading}
+              className="bg-[#00FFA3] text-black hover:bg-[#00DD8C] disabled:opacity-50"
+            >
+              {isLoading ? 'Loading...' : 'Launch Token'}
+            </Button>
+          </div>
+        </form>
+      </Card>
+      
+      {/* Success Modal */}
+      <Dialog open={showSuccessModal} onOpenChange={setShowSuccessModal}>
+        <DialogContent className="bg-gray-900 text-white">
+          <DialogHeader>
+            <DialogTitle className="text-2xl font-bold text-[#00FFA3]">
+              🎉 Congratulations!
+            </DialogTitle>
+            <DialogDescription className="text-gray-300">
+              <div className="space-y-4 mt-4">
+                <div className="bg-gray-800 p-4 rounded-lg">
+                  <h3 className="font-semibold text-white mb-2">Token Details:</h3>
+                  <p>Name: {launchedToken?.name}</p>
+                  <p>Type: {launchedToken?.agentType}</p>
+                  <p>Network: {network}</p>
+                </div>
+                
+                <div className="bg-gray-800 p-4 rounded-lg">
+                  <h3 className="font-semibold text-white mb-2">What's Next?</h3>
+                  <ul className="list-disc list-inside space-y-2">
+                    <li>Your token is now live and ready to interact</li>
+                    <li>You can manage your token from the dashboard</li>
+                    <li>Share your token with the community</li>
+                    <li>Start engaging with users through your token</li>
+                  </ul>
+                </div>
+
+                <div className="flex justify-center mt-4">
+                  <Button
+                    onClick={() => {
+                      setShowSuccessModal(false);
+                      navigate(`/token/${launchedToken?.id}`);
+                    }}
+                    className="bg-[#00FFA3] text-black hover:bg-[#00DD8C]"
+                  >
+                    View My Token
+                  </Button>
+                </div>
+              </div>
+            </DialogDescription>
+          </DialogHeader>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 };

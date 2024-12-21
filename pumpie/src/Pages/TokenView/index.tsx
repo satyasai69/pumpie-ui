@@ -7,6 +7,7 @@ import { api } from '../../services/api';
 import { createChart, ColorType } from 'lightweight-charts';
 import { ArrowLeft } from 'lucide-react';
 import { useTonConnectUI } from '@tonconnect/ui-react';
+import { AIAgent } from '@/services/aiAgent';
 
 interface Token {
   _id: string;
@@ -45,6 +46,10 @@ export const TokenView = () => {
   const [selectedTab, setSelectedTab] = useState<'summary' | 'developer' | 'registry'>('summary');
   const [tradeTab, setTradeTab] = useState<'buy' | 'sell'>('buy');
   const [tonConnectUI] = useTonConnectUI();
+  const [agent, setAgent] = useState<AIAgent | null>(null);
+  const [message, setMessage] = useState('');
+  const [messages, setMessages] = useState<{ role: 'user' | 'agent', content: string }[]>([]);
+  const [isLoading, setIsLoading] = useState(false);
 
   useEffect(() => {
     const loadToken = async () => {
@@ -73,6 +78,26 @@ export const TokenView = () => {
 
     loadToken();
   }, [tokenId, navigate]);
+
+  useEffect(() => {
+    const loadAgent = async () => {
+      if (!tokenId) return;
+      
+      try {
+        const loadedAgent = await AIAgent.loadFromDatabase(tokenId);
+        if (loadedAgent) {
+          setAgent(loadedAgent);
+        } else {
+          toast.error('Failed to load AI agent');
+        }
+      } catch (error) {
+        console.error('Error loading agent:', error);
+        toast.error('Failed to load AI agent');
+      }
+    };
+
+    loadAgent();
+  }, [tokenId]);
 
   useEffect(() => {
     if (!chartContainerRef.current || !token) return;
@@ -141,7 +166,7 @@ export const TokenView = () => {
     };
   }, [token]);
 
-  const handleSendMessage = (e: React.FormEvent) => {
+  const handleSendMessage = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!newMessage.trim()) return;
 
@@ -154,6 +179,25 @@ export const TokenView = () => {
 
     setChatMessages(prev => [...prev, userMessage]);
     setNewMessage('');
+  };
+
+  const handleAISendMessage = async () => {
+    if (!message.trim() || !agent) return;
+
+    try {
+      setIsLoading(true);
+      setMessages(prev => [...prev, { role: 'user', content: message }]);
+      setMessage('');
+
+      const response = await agent.chat(message);
+      
+      setMessages(prev => [...prev, { role: 'agent', content: response }]);
+    } catch (error) {
+      console.error('Error sending message:', error);
+      toast.error('Failed to get response from AI agent');
+    } finally {
+      setIsLoading(false);
+    }
   };
 
   if (loading) {
@@ -405,7 +449,7 @@ export const TokenView = () => {
             {/* Forum Chat */}
             <div className="bg-gray-800/50 rounded-lg p-4">
               <div className="flex items-center justify-between mb-4">
-                <h2 className="text-lg font-semibold text-white">Forum Chat</h2>
+                <h2 className="text-lg font-semibold text-white">Chat with Token AI Agent</h2>
                 <span className="px-2 py-1 text-xs bg-gray-700 text-gray-300 rounded-full">
                   Live
                 </span>
@@ -413,38 +457,37 @@ export const TokenView = () => {
 
               <div className="h-[400px] flex flex-col">
                 <div className="flex-1 overflow-y-auto space-y-4 mb-4">
-                  {chatMessages.map((msg, i) => (
+                  {messages.map((msg, index) => (
                     <div
-                      key={i}
+                      key={index}
                       className={`p-3 rounded-lg ${
-                        msg.role === 'user' ? 'bg-gray-700 ml-8' : 'bg-gray-900 mr-8'
+                        msg.role === 'user' 
+                          ? 'bg-gray-700 ml-auto max-w-[80%]' 
+                          : 'bg-[#00FFA3] text-black mr-auto max-w-[80%]'
                       }`}
                     >
-                      <div className="flex items-center space-x-2 mb-1">
-                        <span className="text-xs text-gray-400">{msg.address}</span>
-                        <span className="text-xs text-gray-500">
-                          {new Date(msg.timestamp!).toLocaleTimeString()}
-                        </span>
-                      </div>
-                      <p className="text-gray-200">{msg.content}</p>
+                      {msg.content}
                     </div>
                   ))}
                 </div>
 
-                <form onSubmit={handleSendMessage} className="mt-auto">
-                  <div className="flex space-x-2">
-                    <input
-                      type="text"
-                      value={newMessage}
-                      onChange={(e) => setNewMessage(e.target.value)}
-                      placeholder="Type your message..."
-                      className="flex-1 bg-gray-700 border border-gray-600 rounded-lg px-4 py-2 text-white placeholder-gray-400 focus:outline-none focus:border-blue-500"
-                    />
-                    <Button type="submit">
-                      Send
-                    </Button>
-                  </div>
-                </form>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={message}
+                    onChange={(e) => setMessage(e.target.value)}
+                    placeholder="Ask the AI agent anything..."
+                    className="flex-1 px-4 py-2 rounded-lg bg-gray-700 border border-gray-600 focus:outline-none focus:border-[#00FFA3]"
+                    onKeyPress={(e) => e.key === 'Enter' && handleAISendMessage()}
+                  />
+                  <button
+                    onClick={handleAISendMessage}
+                    disabled={isLoading || !message.trim()}
+                    className="px-6 py-2 bg-[#00FFA3] text-black rounded-lg hover:bg-[#00DD8C] disabled:opacity-50"
+                  >
+                    {isLoading ? 'Sending...' : 'Send'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

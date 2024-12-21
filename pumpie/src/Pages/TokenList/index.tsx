@@ -121,7 +121,8 @@ interface Token extends TokenData {
 export const TokenList: React.FC = () => {
   const navigate = useNavigate();
   const [tokens, setTokens] = useState<Token[]>([]);
-  const [loading, setLoading] = useState(true);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [isLoading, setIsLoading] = useState(true);
   const [tonConnectUI] = useTonConnectUI();
 
   useEffect(() => {
@@ -130,6 +131,7 @@ export const TokenList: React.FC = () => {
 
   const fetchTokens = async () => {
     try {
+      setIsLoading(true);
       const response = await api.getTokens();
       if (response.success && Array.isArray(response.tokens)) {
         setTokens(response.tokens);
@@ -142,22 +144,20 @@ export const TokenList: React.FC = () => {
       toast.error('Failed to fetch tokens');
       setTokens([]);
     } finally {
-      setLoading(false);
+      setIsLoading(false);
     }
   };
+
+  const filteredTokens = tokens.filter(token => 
+    token.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    token.description?.toLowerCase().includes(searchQuery.toLowerCase()) ||
+    token.agentType.toLowerCase().includes(searchQuery.toLowerCase())
+  );
 
   const handleTokenClick = (tokenId: string) => {
     console.log('Navigating to token:', tokenId);
     navigate(`/token/${tokenId}`);
   };
-
-  if (loading) {
-    return (
-      <div className="min-h-screen flex items-center justify-center">
-        <div className="text-white">Loading tokens...</div>
-      </div>
-    );
-  }
 
   return (
     <div>
@@ -171,45 +171,68 @@ export const TokenList: React.FC = () => {
           >
             <ArrowLeft className="mr-2 h-4 w-4" /> Back
           </Button>
+
+         
+        
           <Title>Token List</Title>
           <Subtitle>View all launched tokens</Subtitle>
+
+          <Button onClick={() => navigate('/launch')} className="bg-[#00FFA3] text-black hover:bg-[#00DD8C]">
+            Create New AI Agent
+          </Button>
+
+          <div className="w-full mt-4">
+            <input
+              type="text"
+              placeholder="Search tokens by name, description, or type..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+              className="w-full px-4 py-2 rounded-lg bg-[#1A1A1A] border border-gray-700 focus:outline-none focus:border-[#00FFA3] text-white"
+            />
+          </div>
         </Header>
 
-        {tokens.length === 0 ? (
-          <div className="text-center py-8">
-            <p className="text-white/80 mb-4">No tokens found</p>
-            <Button onClick={() => navigate('/launch')}>
-              Launch Your First Token
-            </Button>
+        {isLoading ? (
+          <div className="flex justify-center items-center h-64">
+            <div className="animate-spin rounded-full h-8 w-8 border-t-2 border-[#00FFA3]"></div>
           </div>
         ) : (
           <Grid>
-            {tokens.map((token) => (
-              <TokenCard 
-                key={token._id} 
-                onClick={() => handleTokenClick(token._id)}
-                className="transition-transform duration-300 hover:scale-105"
-              >
-                <TokenImage src={token.imageUrl || 'https://picsum.photos/200'} alt={token.name} />
-                <TokenInfo>
-                  <TokenName>{token.name}</TokenName>
-                  <TokenType>{token.agentType}</TokenType>
-                  <TokenDescription>{token.description}</TokenDescription>
-                </TokenInfo>
-                <TokenMetrics>
-                  <MetricItem>
-                    <MetricLabel>Price</MetricLabel>
-                    <MetricValue>${token.price || '0.00'}</MetricValue>
-                  </MetricItem>
-                  <MetricItem>
-                    <MetricLabel>24h Change</MetricLabel>
-                    <MetricValue className={token.priceChange24h && token.priceChange24h > 0 ? 'text-green-500' : 'text-red-500'}>
-                      {token.priceChange24h ? `${token.priceChange24h.toFixed(2)}%` : '0.00%'}
-                    </MetricValue>
-                  </MetricItem>
-                </TokenMetrics>
-              </TokenCard>
-            ))}
+            {filteredTokens.length === 0 ? (
+              <div className="text-center py-8">
+                <p className="text-white/80 mb-4">No tokens found</p>
+                <Button onClick={() => navigate('/launch')}>
+                  Launch Your First Token
+                </Button>
+              </div>
+            ) : (
+              filteredTokens.map((token) => (
+                <TokenCard 
+                  key={token._id} 
+                  onClick={() => handleTokenClick(token._id)}
+                  className="transition-transform duration-300 hover:scale-105"
+                >
+                  <TokenImage src={token.imageUrl || 'https://picsum.photos/200'} alt={token.name} />
+                  <TokenInfo>
+                    <TokenName>{token.name}</TokenName>
+                    <TokenType>{token.agentType}</TokenType>
+                    <TokenDescription>{token.description}</TokenDescription>
+                  </TokenInfo>
+                  <TokenMetrics>
+                    <MetricItem>
+                      <MetricLabel>Price</MetricLabel>
+                      <MetricValue>${token.price || '0.00'}</MetricValue>
+                    </MetricItem>
+                    <MetricItem>
+                      <MetricLabel>24h Change</MetricLabel>
+                      <MetricValue className={token.priceChange24h && token.priceChange24h > 0 ? 'text-green-500' : 'text-red-500'}>
+                        {token.priceChange24h ? `${token.priceChange24h.toFixed(2)}%` : '0.00%'}
+                      </MetricValue>
+                    </MetricItem>
+                  </TokenMetrics>
+                </TokenCard>
+              ))
+            )}
           </Grid>
         )}
       </Container>

@@ -1,7 +1,8 @@
 import axios from 'axios';
 import { TonClient } from '@ton/ton';
+import { agentTemplates } from '../config/agentTemplates';
 
-interface AIAgentConfig {
+export interface AIAgentConfig {
   telegramBotToken?: string;
   twitterConfig?: {
     apiKey: string;
@@ -20,24 +21,38 @@ interface AIAgentConfig {
   platformType: 'telegram' | 'twitter' | 'both';
 }
 
-interface TokenInfo {
+export interface TokenInfo {
   name: string;
   symbol: string;
   totalSupply: string;
   decimals: number;
   owner: string;
+  description?: string;
+  projectDescription?: string;
+  agentType: 'entertainment' | 'utility' | 'social' | 'defi';
+}
+
+interface AgentData {
+  tokenId: string;
+  agentType: 'entertainment' | 'utility' | 'social' | 'defi';
+  personality: any;
+  context: string[];
+  lastActive: Date;
 }
 
 const BASE_URL = process.env.VITE_API_URL || 'http://localhost:3001';
+const HUGGING_FACE_API_URL = 'https://api-inference.huggingface.co/models/meta-llama/Llama-3.3-70B-Instruct/v1/chat/completions';
+const HUGGING_FACE_API_KEY = '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'; // Free API key for testing
 
 // Store active agents in memory
 const activeAgents: Map<string, AIAgent> = new Map();
 
-class AIAgent {
+export class AIAgent {
   private tokenId: string;
   private tokenInfo: TokenInfo | null = null;
   private client: TonClient;
   private context: string[] = [];
+  private personality: any;
 
   constructor(tokenId: string) {
     this.tokenId = tokenId;
@@ -51,23 +66,23 @@ class AIAgent {
       // Fetch token information
       const tokenData = await this.fetchTokenInfo();
       this.tokenInfo = tokenData;
-
-      // Initialize context with token information
-      this.context = [
-        `I am an AI agent specialized in the ${tokenData.name} (${tokenData.symbol}) token.`,
-        `Token Details:`,
-        `- Total Supply: ${this.formatSupply(tokenData.totalSupply, tokenData.decimals)}`,
-        `- Owner: ${tokenData.owner}`,
-        `I can help with:`,
-        `1. Token analysis and statistics`,
-        `2. Price trends and market data`,
-        `3. Technical questions about the token`,
-        `4. Transaction history and holder information`,
-      ];
+      this.personality = agentTemplates[tokenData.agentType];
+      this.initializeContext();
     } catch (error) {
       console.error('Error initializing AI agent:', error);
       throw new Error('Failed to initialize AI agent');
     }
+  }
+
+  private initializeContext() {
+    const { personality } = this.personality;
+    this.context = [
+      `I am an AI agent for ${this.tokenInfo?.name}, a ${this.tokenInfo?.agentType} token.`,
+      `My personality traits: ${personality.traits.join(', ')}`,
+      `I communicate in a ${personality.communication_style} manner`,
+      `My interests include: ${personality.interests.join(', ')}`,
+      `Token Description: ${this.tokenInfo?.description}`
+    ];
   }
 
   private formatSupply(supply: string, decimals: number): string {
@@ -76,15 +91,79 @@ class AIAgent {
   }
 
   private async fetchTokenInfo(): Promise<TokenInfo> {
-    // Implement token info fetching using TON SDK
-    // This is a placeholder implementation
-    return {
-      name: "Sample Token",
-      symbol: "SMPL",
-      totalSupply: "1000000000000000000",
-      decimals: 9,
-      owner: "EQA..."
-    };
+    try {
+      // Fetch token info from your API
+      const response = await axios.get(`${BASE_URL}/api/tokens/${this.tokenId}`);
+      if (response.data && response.data.success) {
+        return {
+          name: response.data.token.name,
+          symbol: response.data.token.symbol,
+          totalSupply: response.data.token.totalSupply || "0",
+          decimals: response.data.token.decimals || 9,
+          owner: response.data.token.creatorAddress,
+          description: response.data.token.description,
+          projectDescription: response.data.token.projectDescription,
+          agentType: response.data.token.agentType
+        };
+      }
+      throw new Error('Failed to fetch token info');
+    } catch (error) {
+      console.error('Error fetching token info:', error);
+      throw error;
+    }
+  }
+
+  async saveToDatabase() {
+    try {
+      const agentData: AgentData = {
+        tokenId: this.tokenId,
+        agentType: this.tokenInfo?.agentType || 'utility',
+        personality: this.personality,
+        context: this.context,
+        lastActive: new Date()
+      };
+
+      await axios.post(`${BASE_URL}/api/agents`, agentData);
+    } catch (error) {
+      console.error('Error saving agent to database:', error);
+    }
+  }
+
+  static async loadFromDatabase(tokenId: string): Promise<AIAgent | null> {
+    try {
+      const response = await axios.get(`${BASE_URL}/api/agents/${tokenId}`);
+      if (response.data) {
+        const agent = new AIAgent(tokenId);
+        await agent.initialize();
+        agent.context = response.data.context;
+        agent.personality = response.data.personality;
+        return agent;
+      }
+      return null;
+    } catch (error) {
+      console.error('Error loading agent from database:', error);
+      return null;
+    }
+  }
+
+  async chat(message: string): Promise<string> {
+    try {
+      const response = await this.generateResponse(message);
+      this.context.push(`User: ${message}`);
+      this.context.push(`Assistant: ${response}`);
+      
+      if (this.context.length > 10) {
+        this.context = this.context.slice(-10);
+      }
+      
+      // Save updated context to database
+      await this.saveToDatabase();
+      
+      return response;
+    } catch (error) {
+      console.error('Chat error:', error);
+      return this.personality.default_responses.error;
+    }
   }
 
   async processMessage(message: string): Promise<string> {
@@ -96,81 +175,97 @@ class AIAgent {
       const response = await this.generateResponse(message);
 
       // Add response to context
-      this.context.push(`Agent: ${response}`);
+      this.context.push(`Assistant: ${response}`);
 
-      // Keep only last 10 messages in context
-      if (this.context.length > 10) {
-        this.context = this.context.slice(-10);
+      // Keep only last 10 messages in context to avoid token limit
+      if (this.context.length > 13) { // 3 system messages + 10 conversation messages
+        this.context = [
+          ...this.context.slice(0, 3), // Keep system messages
+          ...this.context.slice(-10) // Keep last 10 conversation messages
+        ];
       }
 
       return response;
     } catch (error) {
       console.error('Error processing message:', error);
-      throw new Error('Failed to process message');
+      return "I apologize, but I'm having trouble processing your message right now. Please try again later.";
     }
   }
 
   private async generateResponse(message: string): Promise<string> {
-    // Implement your response generation logic here
-    // You can use the context and token information to generate relevant responses
-    
-    const lowercaseMessage = message.toLowerCase();
-    
-    if (lowercaseMessage.includes('price')) {
-      return `The current market data for ${this.tokenInfo?.symbol} shows...`;
+    try {
+      const prompt = `
+        Context:
+        ${this.context.join('\n')}
+        
+        Personality:
+        - Type: ${this.tokenInfo?.agentType} agent
+        - Traits: ${this.personality.personality.traits.join(', ')}
+        - Tone: ${this.personality.personality.tone}
+        - Style: ${this.personality.personality.communication_style}
+        
+        Functions I can perform:
+        ${this.personality.functions.join('\n')}
+        
+        User: ${message}
+        Assistant (respond in the defined personality style):`;
+
+      const response = await axios.post(
+        HUGGING_FACE_API_URL,
+        { inputs: prompt },
+        {
+          headers: {
+            'Authorization': `Bearer ${HUGGING_FACE_API_KEY}`,
+            'Content-Type': 'application/json',
+          },
+        }
+      );
+
+      const generatedText = response.data[0]?.generated_text || '';
+      const assistantResponse = generatedText.split('Assistant:').pop()?.trim() || '';
+      
+      return assistantResponse || this.personality.default_responses.error;
+    } catch (error) {
+      console.error('Error generating response:', error);
+      return this.personality.default_responses.error;
     }
-    
-    if (lowercaseMessage.includes('supply')) {
-      return `The total supply of ${this.tokenInfo?.symbol} is ${this.formatSupply(this.tokenInfo?.totalSupply || "0", this.tokenInfo?.decimals || 9)}`;
-    }
-    
-    if (lowercaseMessage.includes('owner')) {
-      return `The token owner address is ${this.tokenInfo?.owner}`;
-    }
-    
-    if (lowercaseMessage.includes('how') || lowercaseMessage.includes('what')) {
-      return `I'd be happy to help you understand more about ${this.tokenInfo?.name}. Could you please be more specific about what you'd like to know?`;
-    }
-    
-    return `I understand you're asking about ${this.tokenInfo?.symbol}. How can I assist you with your query?`;
   }
 }
 
-export const createAIAgent = async (agentConfig: AIAgentConfig) => {
+export async function createAIAgent(agentConfig: AIAgentConfig) {
   try {
-    // Create agent instance
-    const tokenInfo = {
-      tokenName: agentConfig.tokenName,
-      tokenSymbol: agentConfig.tokenSymbol,
-      description: agentConfig.projectDescription,
-      agentType: agentConfig.platformType === 'twitter' ? 'entertainment' : 'onchain'
-    };
-
-    const agent = new AIAgent(tokenInfo.tokenSymbol);
-    await agent.initialize();
-    activeAgents.set(tokenInfo.tokenSymbol, agent);
-
-    // Still make the API call to handle platform-specific setup
-    const response = await axios.post(`${BASE_URL}/api/create-agent`, agentConfig);
-    return response.data;
-  } catch (error: any) {
-    if (error.response) {
-      throw new Error(error.response.data.error || 'Failed to create AI agent');
+    const response = await axios.post(`${BASE_URL}/api/agents`, agentConfig);
+    
+    if (response.data && response.data.success) {
+      const agent = new AIAgent(response.data.agent.id);
+      await agent.initialize();
+      activeAgents.set(response.data.agent.id, agent);
+      return response.data.agent;
     }
-    throw new Error('Network error occurred');
-  }
-};
-
-export const chatWithAgent = async (tokenSymbol: string, message: string): Promise<string> => {
-  const agent = activeAgents.get(tokenSymbol);
-  if (!agent) {
-    throw new Error('Agent not found for this token');
-  }
-
-  try {
-    return await agent.processMessage(message);
+    
+    throw new Error('Failed to create AI agent');
   } catch (error) {
-    console.error('Error in chat:', error);
-    throw new Error('Failed to get response from agent');
+    console.error('Error creating AI agent:', error);
+    throw error;
   }
-};
+}
+
+export async function chatWithAgent(tokenId: string, message: string): Promise<string> {
+  try {
+    let agent = activeAgents.get(tokenId);
+    
+    if (!agent) {
+      agent = await AIAgent.loadFromDatabase(tokenId);
+      if (!agent) {
+        agent = new AIAgent(tokenId);
+        await agent.initialize();
+      }
+      activeAgents.set(tokenId, agent);
+    }
+    
+    return await agent.chat(message);
+  } catch (error) {
+    console.error('Error chatting with agent:', error);
+    throw error;
+  }
+}
