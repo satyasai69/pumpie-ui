@@ -48,7 +48,8 @@ export const Settings = () => {
 
         // Fetch transactions
         const transactions = await client.getTransactions(address, { limit: 20 });
-        const formattedTransactions = transactions.map(tx => ({
+        console.log(transactions); // Log the transactions to inspect their structure
+        const formattedTransactions: Transaction[] = transactions.map((tx): Transaction => ({
           hash: tx.hash,
           time: tx.time,
           from: tx.inMessage?.source?.toString() || 'Unknown',

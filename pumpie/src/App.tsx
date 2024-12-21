@@ -16,7 +16,7 @@ import { AuthGuard } from './components/guards/AuthGuard';
 function App() {
   return (
     <TonConnectUIProvider 
-      manifestUrl="http://localhost:5173/tonconnect-manifest.json"
+      manifestUrl="https://gold-efficient-shrimp-912.mypinata.cloud/ipfs/QmSTeLxyTyU3C6po1cE52vvZyQwzdSa7moz72zevg6UJ1E"
     >
       <NetworkProvider>
         <ToastProvider>
