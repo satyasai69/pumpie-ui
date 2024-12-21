@@ -1,10 +1,27 @@
 import React, { useEffect, useState } from 'react';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { Address } from '@ton/core';
-import { TonClient } from '@ton/ton';
+import { useNetwork } from '../../context/NetworkContext';
 import { Button } from '@/components/ui/button';
 import { Copy, Check, ExternalLink } from 'lucide-react';
 import { useToast } from '@/components/ui/use-toast';
+
+interface WalletInfo {
+  balance: string;
+  wallet_type: string;
+  user_friendly_address: string;
+}
+
+interface AddressFormats {
+  mainnet: {
+    bounceable: string;    // EQ
+    nonBounceable: string; // UQ
+  };
+  testnet: {
+    bounceable: string;    // kQ
+    nonBounceable: string; // 0Q
+  };
+}
 
 interface Transaction {
   hash: string;
@@ -15,214 +32,292 @@ interface Transaction {
   fee: string;
 }
 
+const getApiBaseUrl = (isTestnet: boolean) => {
+  return isTestnet 
+    ? 'https://testnet.toncenter.com/api/v2'
+    : 'https://toncenter.com/api/v2';
+};
+
+function convertToUserFriendly(address: string, isTestnet: boolean): string {
+  try {
+    let rawAddress = address;
+    
+    // If it's already in a friendly format, parse it first
+    if (address.match(/^(EQ|UQ|kQ|0Q)/)) {
+      const addr = Address.parseFriendly(address);
+      rawAddress = addr.address.toString();
+    }
+    
+    const addr = Address.parse(rawAddress);
+    // Use the correct method for non-bounceable address
+    return addr.toString({
+      testOnly: isTestnet,
+      bounceable: false,
+      urlSafe: true
+    });
+  } catch (error) {
+    console.log('Address conversion error:', error);
+    return address;
+  }
+}
+
 export const Settings = () => {
   const [tonConnectUI] = useTonConnectUI();
+  const { network } = useNetwork();
   const { toast } = useToast();
-  const [balance, setBalance] = useState<string>('0');
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [copied, setCopied] = useState<'bounceable' | 'non-bounceable' | null>(null);
-  const [bounceableAddress, setBounceableAddress] = useState<string>('');
-  const [nonBounceableAddress, setNonBounceableAddress] = useState<string>('');
-
-  // Initialize TON Client
-  const client = new TonClient({
-    endpoint: 'https://toncenter.com/api/v2/jsonRPC',
+  const [copied, setCopied] = useState<'mainnet-bounceable' | 'mainnet-nonbounceable' | 'testnet-bounceable' | 'testnet-nonbounceable' | null>(null);
+  const [addresses, setAddresses] = useState<AddressFormats>({
+    mainnet: {
+      bounceable: '',
+      nonBounceable: ''
+    },
+    testnet: {
+      bounceable: '',
+      nonBounceable: ''
+    }
+  });
+  const [transactions, setTransactions] = useState<number>(0);
+  const [walletInfo, setWalletInfo] = useState<WalletInfo>({
+    balance: '0.0000',
+    wallet_type: 'unknown',
+    user_friendly_address: 'Not Connected'
   });
 
-  useEffect(() => {
-    const fetchAddressInfo = async () => {
-      if (!tonConnectUI.account?.address) return;
-
-      try {
-        // Convert raw address to TON Address object
-        const rawAddress = tonConnectUI.account.address;
-        const address = Address.parse(rawAddress);
-
-        // Get bounceable and non-bounceable formats
-        setBounceableAddress(address.toString({ bounceable: true, urlSafe: true }));
-        setNonBounceableAddress(address.toString({ bounceable: false, urlSafe: true }));
-
-        // Fetch balance
-        const balance = await client.getBalance(address);
-        setBalance(formatTonAmount(balance));
-
-        // Fetch transactions
-        const transactions = await client.getTransactions(address, { limit: 20 });
-        console.log(transactions); // Log the transactions to inspect their structure
-        const formattedTransactions: Transaction[] = transactions.map((tx): Transaction => ({
-          hash: tx.hash,
-          time: tx.time,
-          from: tx.inMessage?.source?.toString() || 'Unknown',
-          to: tx.inMessage?.destination?.toString() || 'Unknown',
-          amount: formatTonAmount(tx.inMessage?.value || '0'),
-          fee: formatTonAmount(tx.fee)
-        }));
-        setTransactions(formattedTransactions);
-      } catch (error) {
-        console.error('Error fetching address info:', error);
-        toast({
-          title: "Error",
-          description: "Failed to fetch wallet information. Please try again.",
-        });
+  const generateAddressFormats = (rawAddress: string) => {
+    try {
+      let addr;
+      
+      // If it's already in a friendly format, parse it first
+      if (rawAddress.match(/^(EQ|UQ|kQ|0Q)/)) {
+        const parsed = Address.parseFriendly(rawAddress);
+        addr = parsed.address;
+      } else {
+        addr = Address.parse(rawAddress);
       }
-    };
 
-    fetchAddressInfo();
-  }, [tonConnectUI.account?.address]);
-
-  const formatTonAmount = (amount: string | bigint): string => {
-    const value = typeof amount === 'string' ? BigInt(amount) : amount;
-    return (Number(value) / 1e9).toFixed(2);
+      // Generate all address formats
+      setAddresses({
+        mainnet: {
+          bounceable: addr.toString({
+            testOnly: false,
+            bounceable: true,
+            urlSafe: true
+          }),
+          nonBounceable: addr.toString({
+            testOnly: false,
+            bounceable: false,
+            urlSafe: true
+          })
+        },
+        testnet: {
+          bounceable: addr.toString({
+            testOnly: true,
+            bounceable: true,
+            urlSafe: true
+          }),
+          nonBounceable: addr.toString({
+            testOnly: true,
+            bounceable: false,
+            urlSafe: true
+          })
+        }
+      });
+    } catch (error) {
+      console.error('Error generating address formats:', error);
+      toast({
+        title: "Error",
+        description: "Failed to generate address formats",
+        variant: "destructive"
+      });
+    }
   };
 
-  const handleCopy = (type: 'bounceable' | 'non-bounceable') => {
-    const address = type === 'bounceable' ? bounceableAddress : nonBounceableAddress;
-    navigator.clipboard.writeText(address);
-    setCopied(type);
-    toast({
-      title: "Address copied!",
-      description: "The address has been copied to your clipboard.",
-    });
-    setTimeout(() => setCopied(null), 2000);
+  const fetchWalletData = async (address: string) => {
+    try {
+      const isTestnet = network === 'testnet';
+      const baseUrl = getApiBaseUrl(isTestnet);
+      
+      const balanceResponse = await fetch(
+        `${baseUrl}/getAddressBalance?address=${address}`
+      );
+      const balanceData = await balanceResponse.json();
+      
+      const txResponse = await fetch(
+        `${baseUrl}/getTransactions?address=${address}`
+      );
+      const txData = await txResponse.json();
+
+      setWalletInfo(prev => ({
+        ...prev,
+        balance: (Number(balanceData.result) / 1e9).toFixed(4),
+        user_friendly_address: address,
+        wallet_type: tonConnectUI.account?.wallet?.name || 'unknown'
+      }));
+      
+      setTransactions(txData.result?.length || 0);
+
+      // Generate all address formats
+      generateAddressFormats(address);
+    } catch (error) {
+      console.error('Error fetching wallet data:', error);
+      toast({
+        title: "Error",
+        description: "Failed to fetch wallet data. Please try again later.",
+        variant: "destructive"
+      });
+    }
   };
 
-  const formatDate = (timestamp: number) => {
-    return new Date(timestamp * 1000).toLocaleString();
+  useEffect(() => {
+    if (tonConnectUI.account?.address) {
+      const userFriendlyAddress = convertToUserFriendly(
+        tonConnectUI.account.address,
+        network === 'testnet'
+      );
+      fetchWalletData(userFriendlyAddress);
+      
+      const interval = setInterval(() => {
+        fetchWalletData(userFriendlyAddress);
+      }, 10000);
+
+      return () => clearInterval(interval);
+    }
+  }, [tonConnectUI.account?.address, network]);
+
+  const formatAddress = (address: string) => {
+    if (!address || address === 'Not Connected') return 'Not Connected';
+    return `${address.slice(0, 6)}...${address.slice(-4)}`;
   };
 
-  if (!tonConnectUI.account?.address) {
-    return (
-      <div className="min-h-screen bg-gray-900 text-white p-8">
-        <h1 className="text-2xl font-bold mb-4">Settings</h1>
-        <p>Please connect your wallet to view settings.</p>
-      </div>
-    );
-  }
+  const copyToClipboard = async (text: string, type: 'mainnet-bounceable' | 'mainnet-nonbounceable' | 'testnet-bounceable' | 'testnet-nonbounceable') => {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(type);
+      toast({
+        title: "Copied!",
+        description: "Address copied to clipboard",
+      });
+      setTimeout(() => setCopied(null), 2000);
+    } catch (err) {
+      toast({
+        title: "Error",
+        description: "Failed to copy address",
+        variant: "destructive"
+      });
+    }
+  };
+
+  const shortAddress = formatAddress(walletInfo.user_friendly_address);
+  const networkType = network === 'testnet' ? 'TON Testnet' : 'TON Mainnet';
 
   return (
-    <div className="min-h-screen bg-gray-900 text-white p-8">
-      <h1 className="text-2xl font-bold mb-8">Settings</h1>
-
-      {/* Wallet Section */}
-      <div className="bg-gray-800 rounded-lg p-6 mb-8">
-        <h2 className="text-xl font-semibold mb-4">Wallet</h2>
-        
-        {/* Balance */}
-        <div className="mb-6">
-          <p className="text-gray-400 text-sm mb-2">Balance</p>
-          <p className="text-2xl font-bold">{balance} TON</p>
-        </div>
-
-        {/* Addresses */}
-        <div className="space-y-4">
+    <div className="container mx-auto px-4 py-8">
+      <h1 className="text-3xl font-bold  text-white mb-8">Wallet Settings</h1>
+      
+      <div className="bg-white rounded-lg shadow-lg p-6 mb-6">
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
           <div>
-            <p className="text-gray-400 text-sm mb-2">Bounceable Address</p>
-            <div className="flex items-center space-x-2">
-              <code className="bg-gray-900 px-3 py-2 rounded-lg flex-1 font-mono text-sm">
-                {bounceableAddress}
-              </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleCopy('bounceable')}
-                className="hover:bg-gray-700"
-              >
-                {copied === 'bounceable' ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
+            <h2 className="text-xl font-semibold mb-4">Wallet Information</h2>
+            <div className="space-y-4">
+              <div>
+                <p className="text-gray-600">Network</p>
+                <p className="font-medium">{networkType}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Balance</p>
+                <p className="font-medium">{walletInfo.balance} TON</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Wallet Type</p>
+                <p className="font-medium">{walletInfo.wallet_type}</p>
+              </div>
+              <div>
+                <p className="text-gray-600">Recent Transactions</p>
+                <p className="font-medium">{transactions}</p>
+              </div>
             </div>
           </div>
-
+          
           <div>
-            <p className="text-gray-400 text-sm mb-2">Non-bounceable Address</p>
-            <div className="flex items-center space-x-2">
-              <code className="bg-gray-900 px-3 py-2 rounded-lg flex-1 font-mono text-sm">
-                {nonBounceableAddress}
-              </code>
-              <Button
-                variant="ghost"
-                size="icon"
-                onClick={() => handleCopy('non-bounceable')}
-                className="hover:bg-gray-700"
-              >
-                {copied === 'non-bounceable' ? (
-                  <Check className="h-4 w-4" />
-                ) : (
-                  <Copy className="h-4 w-4" />
-                )}
-              </Button>
+            <h2 className="text-xl font-semibold mb-4">Addresses</h2>
+            <div className="space-y-6">
+              {/* Mainnet Addresses */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium text-gray-700">Mainnet</h3>
+                <div>
+                  <p className="text-gray-600">Bounceable Address (EQ)</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium font-mono">{formatAddress(addresses.mainnet.bounceable)}</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(addresses.mainnet.bounceable, 'mainnet-bounceable')}
+                    >
+                      {copied === 'mainnet-bounceable' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-gray-600">Non-bounceable Address (UQ)</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium font-mono">{formatAddress(addresses.mainnet.nonBounceable)}</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(addresses.mainnet.nonBounceable, 'mainnet-nonbounceable')}
+                    >
+                      {copied === 'mainnet-nonbounceable' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </div>
+
+              {/* Testnet Addresses */}
+              <div className="space-y-4">
+                <h3 className="text-lg font-medium text-gray-700">Testnet</h3>
+                <div>
+                  <p className="text-gray-600">Bounceable Address (kQ)</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium font-mono">{formatAddress(addresses.testnet.bounceable)}</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(addresses.testnet.bounceable, 'testnet-bounceable')}
+                    >
+                      {copied === 'testnet-bounceable' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+                <div>
+                  <p className="text-gray-600">Non-bounceable Address (0Q)</p>
+                  <div className="flex items-center gap-2">
+                    <p className="font-medium font-mono">{formatAddress(addresses.testnet.nonBounceable)}</p>
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => copyToClipboard(addresses.testnet.nonBounceable, 'testnet-nonbounceable')}
+                    >
+                      {copied === 'testnet-nonbounceable' ? <Check className="h-4 w-4" /> : <Copy className="h-4 w-4" />}
+                    </Button>
+                  </div>
+                </div>
+              </div>
             </div>
           </div>
         </div>
       </div>
 
-      {/* Transactions Section */}
-      <div className="bg-gray-800 rounded-lg p-6">
-        <h2 className="text-xl font-semibold mb-4">Recent Transactions</h2>
-        <div className="overflow-x-auto">
-          <table className="w-full">
-            <thead>
-              <tr className="text-left text-gray-400 text-sm">
-                <th className="pb-4">Time</th>
-                <th className="pb-4">From</th>
-                <th className="pb-4">To</th>
-                <th className="pb-4">Amount</th>
-                <th className="pb-4">Fee</th>
-                <th className="pb-4">Hash</th>
-              </tr>
-            </thead>
-            <tbody className="text-sm">
-              {transactions.map((tx) => (
-                <tr key={tx.hash} className="border-t border-gray-700">
-                  <td className="py-4">{formatDate(tx.time)}</td>
-                  <td className="py-4">
-                    <div className="flex items-center space-x-1">
-                      <span className="truncate max-w-[100px]">{tx.from}</span>
-                      <a
-                        href={`https://tonscan.org/address/${tx.from}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                  </td>
-                  <td className="py-4">
-                    <div className="flex items-center space-x-1">
-                      <span className="truncate max-w-[100px]">{tx.to}</span>
-                      <a
-                        href={`https://tonscan.org/address/${tx.to}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                  </td>
-                  <td className="py-4">{tx.amount} TON</td>
-                  <td className="py-4">{tx.fee} TON</td>
-                  <td className="py-4">
-                    <div className="flex items-center space-x-1">
-                      <span className="truncate max-w-[100px]">{tx.hash}</span>
-                      <a
-                        href={`https://tonscan.org/tx/${tx.hash}`}
-                        target="_blank"
-                        rel="noopener noreferrer"
-                        className="text-blue-400 hover:text-blue-300"
-                      >
-                        <ExternalLink className="h-3 w-3" />
-                      </a>
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+      <div className="bg-white rounded-lg shadow-lg p-6">
+        <h2 className="text-xl font-semibold mb-4">Explorer Links</h2>
+        <div className="space-y-2">
+          <a
+            href={`https://${network === 'testnet' ? 'testnet.' : ''}tonscan.org/address/${walletInfo.user_friendly_address}`}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="flex items-center gap-2 text-blue-600 hover:text-blue-800"
+          >
+            View on TONScan <ExternalLink className="h-4 w-4" />
+          </a>
         </div>
       </div>
     </div>
