@@ -23,7 +23,7 @@ interface ApiResponse<T> {
 }
 
 export const api = {
-  // Create a new token
+  // Create a new token and agent
   createToken: async (tokenData: TokenData) => {
     try {
       console.log('API: Creating token with data:', tokenData);

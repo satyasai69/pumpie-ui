@@ -8,6 +8,7 @@ import { createChart, ColorType } from 'lightweight-charts';
 import { ArrowLeft } from 'lucide-react';
 import { useTonConnectUI } from '@tonconnect/ui-react';
 import { AIAgent } from '@/services/aiAgent';
+import { Forum } from '@/components/Forum/Forum';
 
 interface Token {
   _id: string;
@@ -492,6 +493,9 @@ export const TokenView = () => {
             </div>
           </div>
         </div>
+
+
+        
       </div>
     </div>
   );

@@ -150,23 +150,34 @@ export const LaunchToken: React.FC = () => {
       
       if (response.success) {
         // Create and initialize AI agent
-        const agent = createAIAgent({
-          name: formData.tokenName,
+        const agent = await createAIAgent({
+          tokenName: formData.tokenName,
+          tokenSymbol: formData.tokenSymbol,
+          projectDescription: formData.projectDescription,
           description: formData.description,
-          agentType: formData.agentType,
+          aiConfig: {
+            handleAnnouncements: true,
+            handleUserQueries: true,
+            customInstructions: formData.description
+          },
+          platformType: 'telegram'
         });
 
-        // Save agent to database
-        await agent.saveToDatabase();
-
-        setLaunchedToken(response.token);
-        toast.success('🚀 Token launched successfully!');
-        setShowSuccessModal(true);
-        
-        // Navigate after a delay
-        setTimeout(() => {
-          navigate(`/token/${response.token.id}`);
-        }, 3000);
+        if (agent) {
+          // Add to agent store
+          addTokenAgent(agent.id, formData.agentType, formData.description, formData.projectDescription);
+          
+          setLaunchedToken(response.token);
+          toast.success('🚀 Token and AI agent launched successfully!');
+          setShowSuccessModal(true);
+          
+          // Navigate after a delay
+          setTimeout(() => {
+            navigate(`/token/${response.token.id}`);
+          }, 3000);
+        } else {
+          toast.error('Failed to create AI agent');
+        }
       } else {
         toast.error('Failed to launch token');
       }
